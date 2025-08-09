@@ -4,6 +4,81 @@ import { join } from "path";
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
+// Rate limiting configuration
+interface RateLimitConfig {
+    windowMs: number;
+    maxRequests: number;
+}
+
+interface ClientRecord {
+    requests: number;
+    resetTime: number;
+}
+
+class RateLimiter {
+    private clients = new Map<string, ClientRecord>();
+    private config: RateLimitConfig;
+
+    constructor(config: RateLimitConfig) {
+        this.config = config;
+        // Clean up expired entries every 5 minutes
+        setInterval(() => this.cleanup(), 5 * 60 * 1000);
+    }
+
+    private cleanup() {
+        const now = Date.now();
+        for (const [ip, record] of this.clients.entries()) {
+            if (now > record.resetTime) {
+                this.clients.delete(ip);
+            }
+        }
+    }
+
+    private getClientIP(request: Request): string {
+        const forwarded = request.headers.get('x-forwarded-for');
+        if (forwarded) {
+            return forwarded.split(',')[0].trim();
+        }
+        const realIp = request.headers.get('x-real-ip');
+        if (realIp) {
+            return realIp;
+        }
+        return 'unknown';
+    }
+
+    public checkLimit(request: Request): { allowed: boolean; remaining: number; resetTime: number } {
+        const ip = this.getClientIP(request);
+        const now = Date.now();
+        
+        let record = this.clients.get(ip);
+        
+        if (!record || now > record.resetTime) {
+            record = {
+                requests: 0,
+                resetTime: now + this.config.windowMs
+            };
+            this.clients.set(ip, record);
+        }
+
+        const allowed = record.requests < this.config.maxRequests;
+        
+        if (allowed) {
+            record.requests++;
+        }
+
+        return {
+            allowed,
+            remaining: Math.max(0, this.config.maxRequests - record.requests),
+            resetTime: record.resetTime
+        };
+    }
+}
+
+// Different rate limits for different endpoints
+const generalLimiter = new RateLimiter({ windowMs: 15 * 60 * 1000, maxRequests: 100 }); // 100 requests per 15 minutes
+const saveLimiter = new RateLimiter({ windowMs: 60 * 1000, maxRequests: 10 }); // 10 saves per minute
+const deleteLimiter = new RateLimiter({ windowMs: 60 * 1000, maxRequests: 5 }); // 5 deletes per minute
+
 interface TabData {
     name: string;
     stringCount: number;
@@ -115,11 +190,34 @@ function handleDeleteTab(filename: string): Response {
     }
 }
 
+// Helper function to create rate limit response
+function createRateLimitResponse(remaining: number, resetTime: number): Response {
+    return new Response(JSON.stringify({ 
+        error: "Rate limit exceeded", 
+        remaining: 0,
+        resetTime: Math.ceil((resetTime - Date.now()) / 1000)
+    }), {
+        status: 429,
+        headers: { 
+            "Content-Type": "application/json",
+            "X-RateLimit-Remaining": remaining.toString(),
+            "X-RateLimit-Reset": Math.ceil(resetTime / 1000).toString(),
+            "Retry-After": Math.ceil((resetTime - Date.now()) / 1000).toString()
+        }
+    });
+}
+
 // Servidor principal
 const server = serve({
     port: PORT,
     async fetch(request: Request): Promise<Response> {
         const url = new URL(request.url);
+
+        // Apply general rate limiting to all requests
+        const generalLimit = generalLimiter.checkLimit(request);
+        if (!generalLimit.allowed) {
+            return createRateLimitResponse(generalLimit.remaining, generalLimit.resetTime);
+        }
 
         // Servir página principal
         if (url.pathname === "/") {
@@ -144,9 +242,21 @@ const server = serve({
 
         // API endpoints
         if (url.pathname === "/save" && request.method === "POST") {
+            // Apply save-specific rate limiting
+            const saveLimit = saveLimiter.checkLimit(request);
+            if (!saveLimit.allowed) {
+                return createRateLimitResponse(saveLimit.remaining, saveLimit.resetTime);
+            }
+
             try {
                 const tabData: TabData = await request.json();
-                return handleSave(tabData);
+                const response = handleSave(tabData);
+                
+                // Add rate limit headers to successful responses
+                response.headers.set("X-RateLimit-Remaining", saveLimit.remaining.toString());
+                response.headers.set("X-RateLimit-Reset", Math.ceil(saveLimit.resetTime / 1000).toString());
+                
+                return response;
             } catch (error) {
                 return new Response(JSON.stringify({ error: "Invalid JSON" }), {
                     status: 400,
@@ -165,12 +275,47 @@ const server = serve({
         }
 
         if (url.pathname.startsWith("/delete/") && request.method === "DELETE") {
+            // Apply delete-specific rate limiting
+            const deleteLimit = deleteLimiter.checkLimit(request);
+            if (!deleteLimit.allowed) {
+                return createRateLimitResponse(deleteLimit.remaining, deleteLimit.resetTime);
+            }
+
             const filename = url.pathname.replace("/delete/", "");
-            return handleDeleteTab(filename);
+            const response = handleDeleteTab(filename);
+            
+            // Add rate limit headers to successful responses
+            response.headers.set("X-RateLimit-Remaining", deleteLimit.remaining.toString());
+            response.headers.set("X-RateLimit-Reset", Math.ceil(deleteLimit.resetTime / 1000).toString());
+            
+            return response;
         }
 
         if (url.pathname === "/health" && request.method === "GET") {
             return new Response(JSON.stringify({ status: "ok", timestamp: new Date().toISOString() }), {
+                headers: { "Content-Type": "application/json" }
+            });
+        }
+
+        if (url.pathname === "/rate-limit-status" && request.method === "GET") {
+            const generalStatus = generalLimiter.checkLimit(request);
+            const saveStatus = saveLimiter.checkLimit(request);
+            const deleteStatus = deleteLimiter.checkLimit(request);
+            
+            return new Response(JSON.stringify({
+                general: {
+                    remaining: generalStatus.remaining,
+                    resetTime: Math.ceil((generalStatus.resetTime - Date.now()) / 1000)
+                },
+                save: {
+                    remaining: saveStatus.remaining,
+                    resetTime: Math.ceil((saveStatus.resetTime - Date.now()) / 1000)
+                },
+                delete: {
+                    remaining: deleteStatus.remaining,
+                    resetTime: Math.ceil((deleteStatus.resetTime - Date.now()) / 1000)
+                }
+            }), {
                 headers: { "Content-Type": "application/json" }
             });
         }
