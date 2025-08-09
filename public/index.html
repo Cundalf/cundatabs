@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CundaTabs</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎸 CundaTabs</h1>
+            <div class="controls">
+                <label>Cuerdas: 
+                    <select id="stringCount">
+                        <option value="4" selected>4 (Bajo)</option>
+                        <option value="5">5 (Bajo 5 cuerdas)</option>
+                        <option value="6">6 (Guitarra)</option>
+                        <option value="7">7 cuerdas</option>
+                        <option value="8">8 cuerdas</option>
+                    </select>
+                </label>
+                <input type="text" id="tabName" placeholder="Nombre de la tablatura" />
+                <button onclick="addMeasure()">+ Compás</button>
+                <button onclick="removeMeasure()">- Compás</button>
+                <button onclick="showClearConfirmation()">Limpiar</button>
+                <button class="primary" onclick="saveTab()">💾 Guardar</button>
+                <button class="primary" onclick="exportPNG()">📸 Exportar PNG</button>
+            </div>
+        </div>
+        
+        <div id="status" class="status"></div>
+        
+        <div class="tablature-container" id="tablatureContainer">
+            <div class="tablature" id="tablature"></div>
+        </div>
+        
+        <div class="saved-tabs">
+            <h3>Tablaturas Guardadas</h3>
+            <div id="savedTabs"></div>
+        </div>
+    </div>
+
+    <!-- Modal de confirmación -->
+    <div id="confirmModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 id="modalTitle">Confirmar acción</h3>
+            <p id="modalMessage">¿Estás seguro?</p>
+            <div class="modal-buttons">
+                <button class="modal-button cancel" onclick="closeModal()">Cancelar</button>
+                <button class="modal-button confirm" onclick="confirmAction()">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
