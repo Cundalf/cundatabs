@@ -47,7 +47,7 @@ const server = serve({
             }
 
             try {
-                const tabData: TabData = await request.json();
+                const tabData = await request.json() as TabData;
                 const response = handleSave(tabData);
                 
                 // Add rate limit headers to successful responses

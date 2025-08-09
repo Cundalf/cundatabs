@@ -1,12 +1,20 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { spawn } from "bun";
+import { readdirSync, unlinkSync, existsSync } from "fs";
+import { join } from "path";
 
 const PORT = 3001; // Use different port for tests
 const BASE_URL = `http://localhost:${PORT}`;
 
 let serverProcess: any;
+let initialFiles: string[] = [];
 
 beforeAll(async () => {
+    // Record initial files in tablaturas directory
+    if (existsSync("tablaturas")) {
+        initialFiles = readdirSync("tablaturas");
+    }
+    
     // Start server for testing
     serverProcess = spawn({
         cmd: ["bun", "src/server.ts"],
@@ -22,6 +30,21 @@ beforeAll(async () => {
 afterAll(() => {
     if (serverProcess) {
         serverProcess.kill();
+    }
+    
+    // Clean up test files
+    if (existsSync("tablaturas")) {
+        const currentFiles = readdirSync("tablaturas");
+        const testFiles = currentFiles.filter(file => !initialFiles.includes(file));
+        
+        testFiles.forEach(file => {
+            try {
+                unlinkSync(join("tablaturas", file));
+                console.log(`Cleaned up test file: ${file}`);
+            } catch (error) {
+                console.warn(`Could not clean up ${file}:`, error);
+            }
+        });
     }
 });
 
