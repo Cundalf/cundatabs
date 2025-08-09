@@ -2,7 +2,7 @@ import { serve } from "bun";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
 interface TabData {
     name: string;
@@ -167,6 +167,12 @@ const server = serve({
         if (url.pathname.startsWith("/delete/") && request.method === "DELETE") {
             const filename = url.pathname.replace("/delete/", "");
             return handleDeleteTab(filename);
+        }
+
+        if (url.pathname === "/health" && request.method === "GET") {
+            return new Response(JSON.stringify({ status: "ok", timestamp: new Date().toISOString() }), {
+                headers: { "Content-Type": "application/json" }
+            });
         }
 
         return new Response("Not found", { status: 404 });
